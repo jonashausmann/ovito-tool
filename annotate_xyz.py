@@ -83,15 +83,15 @@ import pandas as pd
 # --------------------------------------------------------------------------
 # CONFIG -- edit these, or override with command-line flags
 # --------------------------------------------------------------------------
-DATA_ROOT = "/Volumes/project_files/ucmerced/2026/monika_simulations"
+DATA_ROOT = "./data"
 
 # >>> Every annotated .xyz lands here, in one flat directory. CHANGE THIS LINE
 # >>> to point at your external disk (mount it first). Also: --out-dir PATH.
-OUTPUT_DIR = "/Volumes/project_files/ucmerced/annotated_directories/all_monika_simulations"
+OUTPUT_DIR = "./output"
 
-XYZ_NAME = "config0.xyz"             # input trajectory, inside each run dir
-INPUT_VALUES_NAME = "input_values.txt"   # constants, inside each run dir
-CSV_GLOBS = (                        # per-frame analysis CSV, first match wins
+XYZ_NAME = "config0.xyz"  # input trajectory, inside each run dir
+INPUT_VALUES_NAME = "input_values.txt"  # constants, inside each run dir
+CSV_GLOBS = (  # per-frame analysis CSV, first match wins
     "csv_files/*_measurements.csv",
     "csv-files/*_measurements.csv",
 )
@@ -105,7 +105,7 @@ COLUMNS = None
 # e.g. ["Rg", "head_theta", "end_to_end"]
 
 # Name of the frame-index column in the CSV. None = auto-detect.
-FRAME_COLUMN = None                  # e.g. "frames"
+FRAME_COLUMN = None  # e.g. "frames"
 
 # Annotated output is bigger than the input (longer comment lines). Used only
 # for the pre-flight free-space estimate.
@@ -114,8 +114,15 @@ SIZE_GROWTH = 1.30
 
 
 FRAME_COLUMN_CANDIDATES = (
-    "frame", "frames", "frame_index", "frame_number", "step", "timestep",
-    "time_step", "t", "index",
+    "frame",
+    "frames",
+    "frame_index",
+    "frame_number",
+    "step",
+    "timestep",
+    "time_step",
+    "t",
+    "index",
 )
 
 
@@ -165,8 +172,10 @@ def fmt_param(value: float, decimals: int = 4) -> str:
 def detect_frame_column(df: pd.DataFrame, explicit: str | None) -> str | None:
     if explicit is not None:
         if explicit not in df.columns:
-            raise RunError(f"frame column '{explicit}' not found in CSV. "
-                           f"Available: {list(df.columns)}")
+            raise RunError(
+                f"frame column '{explicit}' not found in CSV. "
+                f"Available: {list(df.columns)}"
+            )
         return explicit
     lowered = {str(c).strip().lower(): c for c in df.columns}
     for cand in FRAME_COLUMN_CANDIDATES:
@@ -269,9 +278,11 @@ def build_lattice(lo, hi, pad_frac=0.05) -> str:
     pad = pad_frac * span
     L = span + 2 * pad
     org = lo - pad
-    return (f'Lattice="{L[0]:.6f} 0.0 0.0 0.0 {L[1]:.6f} 0.0 '
-            f'0.0 0.0 {max(L[2], 1e-6):.6f}" '
-            f'Origin="{org[0]:.6f} {org[1]:.6f} {org[2]:.6f}"')
+    return (
+        f'Lattice="{L[0]:.6f} 0.0 0.0 0.0 {L[1]:.6f} 0.0 '
+        f'0.0 0.0 {max(L[2], 1e-6):.6f}" '
+        f'Origin="{org[0]:.6f} {org[1]:.6f} {org[2]:.6f}"'
+    )
 
 
 def format_value(val, precision: int) -> str | None:
@@ -288,8 +299,11 @@ def format_value(val, precision: int) -> str | None:
             # Emit a placeholder rather than omitting the key: a missing attribute
             # would make OVITO print the literal "[Rg]" on that frame.
             return "nan"
-        return f"{f:.{precision}g}" if abs(f) and (abs(f) < 1e-4 or abs(f) >= 1e6) \
+        return (
+            f"{f:.{precision}g}"
+            if abs(f) and (abs(f) < 1e-4 or abs(f) >= 1e6)
             else f"{f:.{precision}f}"
+        )
     s = str(val).strip()
     if not s:
         return None
@@ -310,8 +324,9 @@ def discover_runs(root: str) -> list[str]:
             continue
         for run in sorted(os.listdir(param_dir)):
             run_dir = os.path.join(param_dir, run)
-            if os.path.isdir(run_dir) and \
-               os.path.isfile(os.path.join(run_dir, XYZ_NAME)):
+            if os.path.isdir(run_dir) and os.path.isfile(
+                os.path.join(run_dir, XYZ_NAME)
+            ):
                 runs.append(run_dir)
     return runs
 
@@ -343,7 +358,9 @@ def run_parameters(run_dir: str) -> dict[str, float]:
         try:
             params[key] = float(raw[key])
         except ValueError:
-            raise RunError(f"'{key}' is not a number in {INPUT_VALUES_NAME}: {raw[key]!r}")
+            raise RunError(
+                f"'{key}' is not a number in {INPUT_VALUES_NAME}: {raw[key]!r}"
+            )
 
     params["ChiralityAngle"] = params["ChiralityAngle"] * 180.0 / np.pi
     return params
@@ -370,10 +387,12 @@ def run_suffix(run_dir: str) -> str:
 
 
 def output_path(run_dir: str, params: dict[str, float], args) -> str:
-    name = (f"trajectory_F{fmt_param(params['activity'])}"
-            f"_K{fmt_param(params['bending'])}"
-            f"_T{fmt_param(params['ChiralityAngle'])}"
-            f"{run_suffix(run_dir)}.xyz")
+    name = (
+        f"trajectory_F{fmt_param(params['activity'])}"
+        f"_K{fmt_param(params['bending'])}"
+        f"_T{fmt_param(params['ChiralityAngle'])}"
+        f"{run_suffix(run_dir)}.xyz"
+    )
     return os.path.join(args.out_dir, name)
 
 
@@ -382,8 +401,14 @@ def output_path(run_dir: str, params: dict[str, float], args) -> str:
 # --------------------------------------------------------------------------
 def annotate_run(run_dir: str, args) -> dict:
     """Annotate a single run. Returns a result dict; never raises RunError."""
-    result = {"run": run_dir, "status": "ok", "message": "", "out": None,
-              "frames": 0, "details": []}
+    result = {
+        "run": run_dir,
+        "status": "ok",
+        "message": "",
+        "out": None,
+        "frames": 0,
+        "details": [],
+    }
     try:
         params = run_parameters(run_dir)
         out_path = output_path(run_dir, params, args)
@@ -406,11 +431,15 @@ def annotate_run(run_dir: str, args) -> dict:
             wanted = [c.strip() for c in args.columns.split(",") if c.strip()]
             missing = [c for c in wanted if c not in df.columns]
             if missing:
-                raise RunError(f"columns not in CSV: {missing}. "
-                               f"Available: {list(df.columns)}")
+                raise RunError(
+                    f"columns not in CSV: {missing}. Available: {list(df.columns)}"
+                )
         else:
-            wanted = [c for c in df.columns
-                      if c != frame_col and pd.api.types.is_numeric_dtype(df[c])]
+            wanted = [
+                c
+                for c in df.columns
+                if c != frame_col and pd.api.types.is_numeric_dtype(df[c])
+            ]
         if not wanted:
             raise RunError("no columns selected to embed")
 
@@ -419,7 +448,9 @@ def annotate_run(run_dir: str, args) -> dict:
             raise RunError(f"column names collide after sanitizing: {keys}")
         clash = set(keys.values()) & set(CONST_PARAMS)
         if clash:
-            raise RunError(f"CSV columns clash with input_values constants: {sorted(clash)}")
+            raise RunError(
+                f"CSV columns clash with input_values constants: {sorted(clash)}"
+            )
 
         # frame value -> row index
         if frame_col is not None:
@@ -431,25 +462,32 @@ def annotate_run(run_dir: str, args) -> dict:
             base = 0
 
         # ---- pass 1: geometry -------------------------------------------
-        n_frames, has_species, n_coords, n_extra, sample, lo, hi = \
-            scan_geometry(xyz_path, args.layout)
+        n_frames, has_species, n_coords, n_extra, sample, lo, hi = scan_geometry(
+            xyz_path, args.layout
+        )
         result["frames"] = n_frames
-        lattice = "" if args.no_lattice else build_lattice(lo, hi, args.pad) + ' pbc="F F F"'
+        lattice = (
+            "" if args.no_lattice else build_lattice(lo, hi, args.pad) + ' pbc="F F F"'
+        )
 
         props = "species:S:1:pos:R:3" if has_species else "pos:R:3"
         if n_extra > 0:
             props += f":extra:R:{n_extra}"
 
         # constants, formatted once and reused on every frame
-        const_parts = [f"{k}={float(params[k]):.{args.precision}f}" for k in CONST_PARAMS]
+        const_parts = [
+            f"{k}={float(params[k]):.{args.precision}f}" for k in CONST_PARAMS
+        ]
 
         if n_frames != len(df):
             result["details"].append(
-                f"frame count mismatch: {n_frames} in XYZ, {len(df)} in CSV")
+                f"frame count mismatch: {n_frames} in XYZ, {len(df)} in CSV"
+            )
         if hi[0] - lo[0] == 0 or hi[1] - lo[1] == 0:
             result["details"].append(
                 "an in-plane axis has zero extent -- columns are probably misread; "
-                "try --layout species3")
+                "try --layout species3"
+            )
 
         # ---- pass 2: rewrite --------------------------------------------
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -470,7 +508,9 @@ def annotate_run(run_dir: str, args) -> dict:
                     parts.append(f"Properties={props}")
                     parts.append(f"Frame={i}")
                     if frame_col is not None and ridx is not None:
-                        parts.append(f"{sanitize(frame_col)}={int(df[frame_col].iloc[ridx])}")
+                        parts.append(
+                            f"{sanitize(frame_col)}={int(df[frame_col].iloc[ridx])}"
+                        )
                     parts.extend(const_parts)
 
                     if ridx is not None:
@@ -483,14 +523,19 @@ def annotate_run(run_dir: str, args) -> dict:
                                 raw = df[col].iloc[ridx]
                                 if isinstance(raw, (float, np.floating)):
                                     parts.append(
-                                        f"{key}_txt=nan" if not np.isfinite(raw)
-                                        else f"{key}_txt={float(raw):.{args.string_precision}f}")
+                                        f"{key}_txt=nan"
+                                        if not np.isfinite(raw)
+                                        else f"{key}_txt={float(raw):.{args.string_precision}f}"
+                                    )
 
                     # preserve any pre-existing keys we did not generate ourselves
-                    for tok in re.findall(r'[A-Za-z_][\w.]*=(?:"[^"]*"|\S+)', old_comment or ""):
+                    for tok in re.findall(
+                        r'[A-Za-z_][\w.]*=(?:"[^"]*"|\S+)', old_comment or ""
+                    ):
                         k = tok.split("=", 1)[0]
-                        if k not in ("Lattice", "Properties", "pbc") and \
-                           not any(pp.startswith(k + "=") for pp in parts):
+                        if k not in ("Lattice", "Properties", "pbc") and not any(
+                            pp.startswith(k + "=") for pp in parts
+                        ):
                             parts.append(tok)
 
                     out.write(f"{natoms}\n")
@@ -501,9 +546,9 @@ def annotate_run(run_dir: str, args) -> dict:
                             out.write(line + "\n")
                         else:
                             s = 1 if has_species else 0
-                            head = tok[:s]                       # species, if any
-                            coords = tok[s:s + 2] + ["0.0"]      # x y -> x y 0.0
-                            tail = tok[s + 2:]                   # any extra columns
+                            head = tok[:s]  # species, if any
+                            coords = tok[s : s + 2] + ["0.0"]  # x y -> x y 0.0
+                            tail = tok[s + 2 :]  # any extra columns
                             out.write(" ".join(head + coords + tail) + "\n")
         except OSError as exc:
             # A half-written trajectory is worse than none: drop it either way.
@@ -518,11 +563,15 @@ def annotate_run(run_dir: str, args) -> dict:
         if missing_rows:
             result["details"].append(
                 f"{missing_rows} frame(s) had no matching CSV row; "
-                "their attributes were omitted")
+                "their attributes were omitted"
+            )
 
-        result["attributes"] = ["Frame"] + \
-            ([sanitize(frame_col)] if frame_col else []) + \
-            list(CONST_PARAMS) + [keys[c] for c in wanted]
+        result["attributes"] = (
+            ["Frame"]
+            + ([sanitize(frame_col)] if frame_col else [])
+            + list(CONST_PARAMS)
+            + [keys[c] for c in wanted]
+        )
         result["sample"] = sample
         result["bbox"] = (lo, hi)
         result["has_species"] = has_species
@@ -535,7 +584,7 @@ def annotate_run(run_dir: str, args) -> dict:
     except RunError as exc:
         result["status"] = "failed"
         result["message"] = str(exc)
-    except Exception as exc:                     # noqa: BLE001 -- one bad run must not stop 1400
+    except Exception as exc:  # noqa: BLE001 -- one bad run must not stop 1400
         result["status"] = "failed"
         result["message"] = f"{type(exc).__name__}: {exc}"
     return result
@@ -552,8 +601,14 @@ def _worker(run_dir: str, args):
     try:
         return annotate_run(run_dir, args)
     except DiskFull as exc:
-        return {"run": run_dir, "status": "diskfull", "message": str(exc),
-                "out": None, "frames": 0, "details": []}
+        return {
+            "run": run_dir,
+            "status": "diskfull",
+            "message": str(exc),
+            "out": None,
+            "frames": 0,
+            "details": [],
+        }
 
 
 # --------------------------------------------------------------------------
@@ -572,23 +627,29 @@ def print_details(result: dict, root: str) -> None:
     print(f"\n  --- {rel} ---")
     print(f"  CSV              : {os.path.basename(result['csv'])}")
     p = result["params"]
-    print(f"  constants        : activity={p['activity']:g} bending={p['bending']:g} "
-          f"ChiralityAngle={p['ChiralityAngle']:.6f} deg")
+    print(
+        f"  constants        : activity={p['activity']:g} bending={p['bending']:g} "
+        f"ChiralityAngle={p['ChiralityAngle']:.6f} deg"
+    )
     sample = result["sample"]
     start = 1 if result["has_species"] else 0
     print(f"  sample atom line : {' '.join(sample)}")
     if result["has_species"]:
         print(f"  species / type   : {sample[0]}")
-    for k, axis in enumerate("xyz"[:result["n_coords"]]):
+    for k, axis in enumerate("xyz"[: result["n_coords"]]):
         print(f"  {axis}                : {sample[start + k]}")
     if result["n_coords"] == 2:
         print("  z                : 0.0  (padded)")
     if result["n_extra"]:
         print(f"  extra columns    : {result['n_extra']} (passed through)")
     lo, hi = result["bbox"]
-    print(f"  bounding box     : x [{lo[0]:.3f}, {hi[0]:.3f}]  "
-          f"y [{lo[1]:.3f}, {hi[1]:.3f}]  z [{lo[2]:.3f}, {hi[2]:.3f}]")
-    print(f"  OVITO attributes : {', '.join('[' + a + ']' for a in result['attributes'])}")
+    print(
+        f"  bounding box     : x [{lo[0]:.3f}, {hi[0]:.3f}]  "
+        f"y [{lo[1]:.3f}, {hi[1]:.3f}]  z [{lo[2]:.3f}, {hi[2]:.3f}]"
+    )
+    print(
+        f"  OVITO attributes : {', '.join('[' + a + ']' for a in result['attributes'])}"
+    )
 
 
 # --------------------------------------------------------------------------
@@ -597,48 +658,99 @@ def print_details(result: dict, root: str) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(
         description="Batch-embed per-frame CSV values and run constants into every "
-                    "config0.xyz under a data root, as OVITO global attributes.")
-    p.add_argument("--root", default=DATA_ROOT,
-                   help="data root holding <parameter dir>/<run dir> (default: %(default)s)")
-    p.add_argument("--out-dir", default=OUTPUT_DIR,
-                   help="single directory receiving every annotated .xyz "
-                        "(default: %(default)s)")
-    p.add_argument("--only", action="append", default=None, metavar="PATTERN",
-                   help="only runs whose '<param dir>/<run dir>' matches this glob "
-                        "(repeatable), e.g. --only 'F05_*' --only '*/RUN_0001'")
-    p.add_argument("--limit", type=int, default=None,
-                   help="process at most N pending runs")
-    p.add_argument("--overwrite", action="store_true",
-                   help="rewrite outputs that already exist (default: skip them)")
-    p.add_argument("--dry-run", action="store_true",
-                   help="list what would be written, then stop")
-    p.add_argument("--jobs", type=int, default=min(4, os.cpu_count() or 1),
-                   help="parallel worker processes (default: %(default)s)")
-    p.add_argument("--force", action="store_true",
-                   help="start even if the free-space estimate says it will not fit")
-    p.add_argument("--verbose", action="store_true",
-                   help="print the per-run parse check")
-    p.add_argument("--columns", default=COLUMNS if isinstance(COLUMNS, str) else None,
-                   help="comma-separated CSV columns to embed (default: all numeric)")
-    p.add_argument("--frame-column", default=FRAME_COLUMN,
-                   help="name of the frame-index column in the CSV")
-    p.add_argument("--precision", type=int, default=6,
-                   help="decimal places written for floats (default: 6)")
-    p.add_argument("--string-attrs", action="store_true",
-                   help="also emit pre-rounded string copies (Rg_txt=4.72) so you can "
-                        "control precision per value in OVITO, since the Text label "
-                        "layer applies one numeric format string to all placeholders")
-    p.add_argument("--string-precision", type=int, default=2,
-                   help="decimals for the _txt string copies (default: 2)")
-    p.add_argument("--layout", default="auto",
-                   choices=["auto", "species3", "species2", "plain3", "plain2"],
-                   help="atom-line column layout. species3 = <type> x y z (the usual "
-                        "case, including numeric type IDs); species2 = <type> x y; "
-                        "plain3 = x y z; plain2 = x y. Default: auto-detect.")
-    p.add_argument("--no-lattice", action="store_true",
-                   help="do not write a Lattice= key (OVITO will auto-fit a box)")
-    p.add_argument("--pad", type=float, default=0.05,
-                   help="fractional padding on the generated cell (default: 0.05)")
+        "config0.xyz under a data root, as OVITO global attributes."
+    )
+    p.add_argument(
+        "--root",
+        default=DATA_ROOT,
+        help="data root holding <parameter dir>/<run dir> (default: %(default)s)",
+    )
+    p.add_argument(
+        "--out-dir",
+        default=OUTPUT_DIR,
+        help="single directory receiving every annotated .xyz (default: %(default)s)",
+    )
+    p.add_argument(
+        "--only",
+        action="append",
+        default=None,
+        metavar="PATTERN",
+        help="only runs whose '<param dir>/<run dir>' matches this glob "
+        "(repeatable), e.g. --only 'F05_*' --only '*/RUN_0001'",
+    )
+    p.add_argument(
+        "--limit", type=int, default=None, help="process at most N pending runs"
+    )
+    p.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="rewrite outputs that already exist (default: skip them)",
+    )
+    p.add_argument(
+        "--dry-run", action="store_true", help="list what would be written, then stop"
+    )
+    p.add_argument(
+        "--jobs",
+        type=int,
+        default=min(4, os.cpu_count() or 1),
+        help="parallel worker processes (default: %(default)s)",
+    )
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="start even if the free-space estimate says it will not fit",
+    )
+    p.add_argument(
+        "--verbose", action="store_true", help="print the per-run parse check"
+    )
+    p.add_argument(
+        "--columns",
+        default=COLUMNS if isinstance(COLUMNS, str) else None,
+        help="comma-separated CSV columns to embed (default: all numeric)",
+    )
+    p.add_argument(
+        "--frame-column",
+        default=FRAME_COLUMN,
+        help="name of the frame-index column in the CSV",
+    )
+    p.add_argument(
+        "--precision",
+        type=int,
+        default=6,
+        help="decimal places written for floats (default: 6)",
+    )
+    p.add_argument(
+        "--string-attrs",
+        action="store_true",
+        help="also emit pre-rounded string copies (Rg_txt=4.72) so you can "
+        "control precision per value in OVITO, since the Text label "
+        "layer applies one numeric format string to all placeholders",
+    )
+    p.add_argument(
+        "--string-precision",
+        type=int,
+        default=2,
+        help="decimals for the _txt string copies (default: 2)",
+    )
+    p.add_argument(
+        "--layout",
+        default="auto",
+        choices=["auto", "species3", "species2", "plain3", "plain2"],
+        help="atom-line column layout. species3 = <type> x y z (the usual "
+        "case, including numeric type IDs); species2 = <type> x y; "
+        "plain3 = x y z; plain2 = x y. Default: auto-detect.",
+    )
+    p.add_argument(
+        "--no-lattice",
+        action="store_true",
+        help="do not write a Lattice= key (OVITO will auto-fit a box)",
+    )
+    p.add_argument(
+        "--pad",
+        type=float,
+        default=0.05,
+        help="fractional padding on the generated cell (default: 0.05)",
+    )
     args = p.parse_args()
 
     args.root = os.path.abspath(os.path.expanduser(args.root))
@@ -652,10 +764,12 @@ def main() -> None:
     if not os.path.isdir(args.out_dir):
         parent = os.path.dirname(args.out_dir)
         if not os.path.isdir(parent):
-            sys.exit(f"ERROR: output directory not reachable: {args.out_dir}\n"
-                     f"  '{parent}' does not exist -- is the disk plugged in?\n"
-                     f"  Edit the OUTPUT_DIR line at the top of this script, "
-                     f"or pass --out-dir PATH.")
+            sys.exit(
+                f"ERROR: output directory not reachable: {args.out_dir}\n"
+                f"  '{parent}' does not exist -- is the disk plugged in?\n"
+                f"  Edit the OUTPUT_DIR line at the top of this script, "
+                f"or pass --out-dir PATH."
+            )
         if not args.dry_run:
             os.makedirs(args.out_dir, exist_ok=True)
 
@@ -665,9 +779,13 @@ def main() -> None:
         sys.exit(f"ERROR: no run directory under {args.root} contains {XYZ_NAME}")
 
     if args.only:
-        runs = [r for r in runs
-                if any(fnmatch.fnmatch(os.path.relpath(r, args.root), pat)
-                       for pat in args.only)]
+        runs = [
+            r
+            for r in runs
+            if any(
+                fnmatch.fnmatch(os.path.relpath(r, args.root), pat) for pat in args.only
+            )
+        ]
         if not runs:
             sys.exit(f"ERROR: no run matches {args.only}")
 
@@ -686,9 +804,14 @@ def main() -> None:
             continue
         # One flat directory means two runs could map onto one filename.
         if out in claimed:
-            unresolved.append((run_dir, f"output name collides with "
-                                        f"{os.path.relpath(claimed[out], args.root)}: "
-                                        f"{os.path.basename(out)}"))
+            unresolved.append(
+                (
+                    run_dir,
+                    f"output name collides with "
+                    f"{os.path.relpath(claimed[out], args.root)}: "
+                    f"{os.path.basename(out)}",
+                )
+            )
             continue
         claimed[out] = run_dir
         if os.path.isfile(out) and not args.overwrite:
@@ -697,9 +820,12 @@ def main() -> None:
             pending.append((run_dir, out))
 
     if args.limit is not None:
-        pending = pending[:args.limit]
+        pending = pending[: args.limit]
 
-    est = sum(os.path.getsize(os.path.join(r, XYZ_NAME)) for r, _ in pending) * SIZE_GROWTH
+    est = (
+        sum(os.path.getsize(os.path.join(r, XYZ_NAME)) for r, _ in pending)
+        * SIZE_GROWTH
+    )
     probe = args.out_dir
     while not os.path.isdir(probe):
         parent = os.path.dirname(probe)
@@ -708,15 +834,18 @@ def main() -> None:
         probe = parent
     free = shutil.disk_usage(probe).free
 
-    print(f"Pending  : {len(pending)}"
-          + (f"  ({already} already annotated, skipped)" if already else "")
-          + (f"  ({len(unresolved)} unreadable)" if unresolved else ""))
+    print(
+        f"Pending  : {len(pending)}"
+        + (f"  ({already} already annotated, skipped)" if already else "")
+        + (f"  ({len(unresolved)} unreadable)" if unresolved else "")
+    )
     print(f"Estimate : {human(est)} of output, {human(free)} free on {probe}")
 
     if args.dry_run:
         for run_dir, out in pending:
-            print(f"  {os.path.relpath(run_dir, args.root)}"
-                  f"  ->  {os.path.basename(out)}")
+            print(
+                f"  {os.path.relpath(run_dir, args.root)}  ->  {os.path.basename(out)}"
+            )
         for run_dir, msg in unresolved:
             print(f"  SKIP {os.path.relpath(run_dir, args.root)}: {msg}")
         return
@@ -726,9 +855,11 @@ def main() -> None:
         return
 
     if est > free * 0.95 and not args.force:
-        sys.exit(f"\nERROR: not enough free space -- need ~{human(est)}, have {human(free)}.\n"
-                 f"  Narrow the batch with --only / --limit, write elsewhere with\n"
-                 f"  --out-root, free up space, or override with --force.")
+        sys.exit(
+            f"\nERROR: not enough free space -- need ~{human(est)}, have {human(free)}.\n"
+            f"  Narrow the batch with --only / --limit, write elsewhere with\n"
+            f"  --out-root, free up space, or override with --force."
+        )
 
     # ---- run -------------------------------------------------------------
     print()
@@ -742,16 +873,28 @@ def main() -> None:
         if args.jobs > 1 and len(run_dirs) > 1:
             with multiprocessing.Pool(args.jobs) as pool:
                 results = pool.imap_unordered(work, run_dirs)
-                _consume(results, len(pending), width, args, counts, failures, warnings, pool)
+                _consume(
+                    results, len(pending), width, args, counts, failures, warnings, pool
+                )
         else:
-            _consume((work(r) for r in run_dirs), len(pending), width, args,
-                     counts, failures, warnings, None)
+            _consume(
+                (work(r) for r in run_dirs),
+                len(pending),
+                width,
+                args,
+                counts,
+                failures,
+                warnings,
+                None,
+            )
     except KeyboardInterrupt:
         print("\nInterrupted.")
 
     # ---- summary ---------------------------------------------------------
-    print(f"\nDone: {counts['ok']} annotated, {counts['skipped']} skipped, "
-          f"{counts['failed']} failed.")
+    print(
+        f"\nDone: {counts['ok']} annotated, {counts['skipped']} skipped, "
+        f"{counts['failed']} failed."
+    )
     if warnings:
         print(f"\n{len(warnings)} run(s) with warnings:")
         for rel, msgs in warnings[:20]:
@@ -760,13 +903,17 @@ def main() -> None:
             print(f"  ... and {len(warnings) - 20} more")
     if failures or unresolved:
         print(f"\n{len(failures) + len(unresolved)} run(s) could not be annotated:")
-        for rel, msg in [(os.path.relpath(r, args.root), m) for r, m in unresolved] + failures:
+        for rel, msg in [
+            (os.path.relpath(r, args.root), m) for r, m in unresolved
+        ] + failures:
             print(f"  {rel}: {msg}")
 
     if counts["ok"]:
         print("\nOVITO Text label placeholders, e.g.:")
-        print("  F = [activity]<br>K = [bending]<br>theta = [ChiralityAngle] deg"
-              "<br>Rg = [Rg]<br>Frame [Frame]")
+        print(
+            "  F = [activity]<br>K = [bending]<br>theta = [ChiralityAngle] deg"
+            "<br>Rg = [Rg]<br>Frame [Frame]"
+        )
 
 
 def _consume(results, total, width, args, counts, failures, warnings, pool) -> None:
@@ -780,8 +927,10 @@ def _consume(results, total, width, args, counts, failures, warnings, pool) -> N
             raise SystemExit(1)
         counts[res["status"]] += 1
         if res["status"] == "ok":
-            print(f"[{n:>{width}}/{total}] {rel}  ->  "
-                  f"{os.path.basename(res['out'])}  ({res['frames']} frames)")
+            print(
+                f"[{n:>{width}}/{total}] {rel}  ->  "
+                f"{os.path.basename(res['out'])}  ({res['frames']} frames)"
+            )
             if args.verbose:
                 print_details(res, args.root)
             if res["details"]:
