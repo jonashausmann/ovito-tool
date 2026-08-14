@@ -48,6 +48,31 @@ collide:
     <OUTPUT_DIR>/trajectory_F5.0_K0.5_T45.0_Run2.xyz
     ...
 
+DRAWING THE CHAIN AS A LINE
+---------------------------
+XYZ carries no bonds, and a distance cutoff cannot recover them: bonded
+neighbours reach ~1.03 while non-adjacent monomers close to ~0.88, so
+"Create bonds" would stitch the chain to itself wherever it folds. Instead a
+``topology_N<n>.data`` LAMMPS file is written alongside the trajectories, one
+per distinct chain length, holding N beads and the N-1 backbone bonds. Load
+that file in OVITO, then add "Load trajectory" pointed at a trajectory_*.xyz;
+the ``id`` column written into each atom line matches beads to the topology by
+identity rather than by storage order.
+
+HIGHLIGHTING INDIVIDUAL MONOMERS
+--------------------------------
+Any CSV column naming a monomer (``max_curv_monomer``, ``min_curv_monomer``,
+...) is already a per-frame global attribute, so OVITO can colour that bead and
+its neighbours with an "Expression selection" + "Assign color" pair -- the
+selection follows the monomer as it moves from frame to frame, and unticking
+the two modifiers switches the highlight off. Nothing is baked into the .xyz
+files, so a new highlight costs no rewriting.
+
+The groups are declared in the HIGHLIGHTS list in the CONFIG block; the script
+checks them against the data and writes the exact expressions and colours to
+``<OUTPUT_DIR>/ovito_setup.txt``. Add an entry, rerun with --guide-only, and
+the instructions refresh in seconds.
+
 USAGE
 -----
     python annotate_xyz.py                     # every run under DATA_ROOT
@@ -76,6 +101,7 @@ import os
 import re
 import shutil
 import sys
+from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -99,6 +125,50 @@ CSV_GLOBS = (  # per-frame analysis CSV, first match wins
 # Constants lifted from input_values.txt into every frame's comment line.
 # ChiralityAngle is stored in radians there and written out in degrees.
 CONST_PARAMS = ("activity", "bending", "ChiralityAngle")
+
+
+class Highlight(NamedTuple):
+    """A group of monomers to colour differently in OVITO, defined per frame.
+
+    ``anchor`` names a CSV column holding a monomer index; the group is that
+    bead and the ``span - 1`` beads after it. Because the anchor is already
+    written into every frame's comment line as a global attribute, OVITO can
+    resolve the group itself with an expression -- so adding a highlight needs
+    two modifiers in the GUI and NO regeneration of the trajectories.
+    """
+
+    name: str  # label, used in the generated guide
+    anchor: str  # CSV column holding the monomer index
+    span: int  # beads in the group, counting from the anchor
+    color: tuple  # R, G, B in 0..1
+    note: str  # what it means, for the guide
+
+
+# Add an entry here to define another highlight; anything in the CSV that names
+# a monomer works. Nothing needs rewriting afterwards -- rerun with --guide-only
+# to refresh the instructions.
+#
+# A curvature angle is measured at bead m from the beads m, m+1 and m+2 (verified
+# against the geometry: the angle reconstructed at those three beads reproduces
+# the CSV's max_curv/min_curv exactly), hence span=3.
+HIGHLIGHTS = (
+    Highlight(
+        "Max curvature",
+        "max_curv_monomer",
+        3,
+        (1.00, 0.20, 0.20),
+        "the sharpest bend in the chain",
+    ),
+    Highlight(
+        "Min curvature",
+        "min_curv_monomer",
+        3,
+        (0.10, 0.85, 0.30),
+        # Green, not blue: OVITO's default colour for particle type 2 is already
+        # a blue-violet, and a blue highlight is hard to pick out against it.
+        "the straightest joint in the chain",
+    ),
+)
 
 # Which CSV columns to embed. None = every numeric column except the frame column.
 COLUMNS = None
@@ -378,6 +448,166 @@ def find_csv(run_dir: str) -> str:
     return matches[0]
 
 
+def atom_count(xyz_path: str) -> int:
+    """Monomer count = the atom count on the first frame's header line."""
+    with open(xyz_path) as fh:
+        for line in fh:
+            if line.strip():
+                try:
+                    return int(line.split()[0])
+                except (ValueError, IndexError):
+                    raise RunError(f"expected an atom count, got: {line!r}")
+    raise RunError("empty XYZ file")
+
+
+def first_species(xyz_path: str) -> int:
+    """The numeric particle type on the first atom line, or 1 if it is not one.
+
+    The topology has to declare the same type the trajectory carries, otherwise
+    OVITO warns that "numeric particle type ID 2 ... does not exist" and falls
+    back to the default colour and radius for every bead.
+    """
+    for natoms, _, atoms in iter_frames(xyz_path):
+        for line in atoms:
+            tok = line.split()
+            if len(tok) >= 4 and re.fullmatch(r"\d+", tok[0]):
+                return int(tok[0])
+            return 1
+    return 1
+
+
+def write_topology(
+    n_atoms: str | int, out_dir: str, box: float = 500.0, atom_type: int = 1
+) -> str:
+    """A LAMMPS data file holding the chain connectivity: N beads, N-1 bonds.
+
+    XYZ cannot carry bonds, and a distance cutoff cannot recover them here --
+    bonds stretch to ~1.03 while non-adjacent monomers approach ~0.88, so
+    Create Bonds would cross-link the chain wherever it folds onto itself.
+    Load this file in OVITO and stream the coordinates onto it with the
+    'Load trajectory' modifier. One file serves every run of equal length.
+
+    Coordinates below are placeholders (a straight line) -- the trajectory
+    overwrites them, as does its Lattice, so the huge box here only exists to
+    keep the placeholders unwrapped and never reaches the viewport.
+    """
+    n = int(n_atoms)
+    t = max(1, int(atom_type))
+    path = os.path.join(out_dir, f"topology_N{n}.data")
+    with open(path, "w") as fh:
+        fh.write(
+            f"LAMMPS data file -- linear polymer topology, {n} monomers, "
+            f"{n - 1} bonds (generated by annotate_xyz.py)\n\n"
+        )
+        fh.write(f"{n} atoms\n{n - 1} bonds\n\n")
+        # Declaring t types (not 1) so the type the trajectory carries exists.
+        fh.write(f"{t} atom types\n1 bond types\n\n")
+        for axis in "xyz":
+            fh.write(f"{-box:.1f} {box:.1f} {axis}lo {axis}hi\n")
+        fh.write("\nAtoms # bond\n\n")
+        for i in range(1, n + 1):
+            # atom-ID molecule-ID atom-type x y z
+            fh.write(f"{i} 1 {t} {float(i - 1):.1f} 0.0 0.0\n")
+        fh.write("\nBonds\n\n")
+        for i in range(1, n):
+            # bond-ID bond-type atom-1 atom-2
+            fh.write(f"{i} 1 {i} {i + 1}\n")
+    return path
+
+
+def highlight_expression(h: Highlight) -> str:
+    """The OVITO 'Expression selection' text that picks out this group.
+
+    The anchor resolves to the frame's global attribute, so the selection
+    follows the moving monomer without any per-particle data in the file.
+    """
+    key = sanitize(h.anchor)
+    if h.span == 1:
+        return f"ParticleIdentifier == {key}"
+    return f"ParticleIdentifier >= {key} && ParticleIdentifier <= {key} + {h.span - 1}"
+
+
+def write_highlight_guide(out_dir: str, chain_lengths, highlights=HIGHLIGHTS) -> str:
+    """Write ovito_setup.txt: the click-by-click recipe, next to the data.
+
+    It lives beside the trajectories so it travels with them onto the external
+    disk, where this script will not be.
+    """
+    path = os.path.join(out_dir, "ovito_setup.txt")
+    # Without a known chain length, leave the placeholder rather than guess a
+    # filename the reader would go looking for and not find.
+    n = sorted(chain_lengths)[0] if chain_lengths else "<n>"
+    with open(path, "w") as fh:
+        fh.write(
+            "OVITO setup for these trajectories\n"
+            "==================================\n"
+            "Generated by annotate_xyz.py. Everything below works in OVITO Basic;\n"
+            "no Python script modifier, no Pro licence.\n\n"
+            "1. DRAW THE POLYMER AS A CONNECTED LINE\n"
+            "---------------------------------------\n"
+            f"  a. File > Load File ...    topology_N{n}.data\n"
+            "     A straight row of beads in a huge box appears. Both are\n"
+            "     placeholders that the next step replaces.\n"
+            "  b. Add modifier > Load trajectory ...   trajectory_F*.xyz\n"
+            "     Beads are matched to the topology by their id column, so the\n"
+            "     bonds follow the chain however it folds.\n"
+            "  c. Bonds visual element > set the display width (default 0.4).\n\n"
+            "  The bonds come from the topology file, not from a distance cutoff:\n"
+            "  bonded neighbours reach ~1.03 while non-adjacent monomers close to\n"
+            "  ~0.88, so 'Create bonds' would stitch the chain to itself wherever\n"
+            "  it folds.\n\n"
+            "2. SHOW THE PER-FRAME NUMBERS\n"
+            "-----------------------------\n"
+            "  Viewport layers > Text label. Reference any attribute in [brackets]:\n"
+            "    F = [activity]<br>K = [bending]<br>theta = [ChiralityAngle] deg\n"
+            "    <br>Rg = [Rg]<br>Frame [Frame]\n\n"
+            "3. HIGHLIGHT MONOMERS\n"
+            "---------------------\n"
+            "  For each highlight below, add TWO modifiers, in this order:\n"
+            "    Add modifier > Expression selection   -> paste the expression\n"
+            "    Add modifier > Assign color           -> pick the colour\n"
+            "  Then, once, at the TOP of the pipeline list (i.e. added last):\n"
+            "    Add modifier > Clear selection\n"
+            "  so the last group is not left tinted red by OVITO's selection\n"
+            "  highlighting in the interactive viewport.\n\n"
+            "  The bonds between highlighted beads change colour automatically:\n"
+            "  the Bonds visual element defaults to 'Use particle colors'.\n\n"
+            "  TO TURN A HIGHLIGHT OFF: untick the checkbox next to its two\n"
+            "  modifiers in the pipeline. Tick it again to bring it back.\n\n"
+        )
+        for h in highlights:
+            r, g, b = h.color
+            fh.write(
+                f"  {h.name.upper()}  --  {h.note}\n"
+                f"    anchor attribute : {sanitize(h.anchor)} "
+                f"({h.span} beads: m, m+1, m+2)\n"
+                f"    expression       : {highlight_expression(h)}\n"
+                f"    colour           : R {r:.2f}  G {g:.2f}  B {b:.2f}"
+                f"   (0-255: {round(r * 255)}, {round(g * 255)}, {round(b * 255)})\n\n"
+            )
+        fh.write(
+            "4. ADDING YOUR OWN HIGHLIGHT LATER\n"
+            "----------------------------------\n"
+            "  Every numeric CSV column is already a global attribute in every\n"
+            "  frame, so any column naming a monomer can drive a highlight with\n"
+            "  no rewriting of the .xyz files. Just add the two modifiers with\n"
+            "    ParticleIdentifier >= <column> && ParticleIdentifier <= <column> + <span-1>\n"
+            "  To have annotate_xyz.py document it here too, add a Highlight(...)\n"
+            "  entry to the HIGHLIGHTS list near the top of the script and rerun\n"
+            "  with --guide-only.\n\n"
+            "  Careful with the index convention: <column> is used directly as a\n"
+            "  particle id. That is correct for the curvature columns above, where\n"
+            "  the value is a 0-based bead index and ids are 1-based, which shifts\n"
+            "  the group onto the three beads that actually form the angle. A\n"
+            "  column using a different convention needs its own offset.\n\n"
+            "  Attributes available on every frame:\n"
+        )
+        for key in ("Frame", "frames") + CONST_PARAMS:
+            fh.write(f"    {key}\n")
+        fh.write("    ... plus every numeric column of the run's measurements CSV\n")
+    return path
+
+
 def run_suffix(run_dir: str) -> str:
     """'RUN_0003' -> '_Run3'. Keeps the five runs of one parameter set apart
     now that every trajectory lands in the same output directory."""
@@ -473,6 +703,11 @@ def annotate_run(run_dir: str, args) -> dict:
         props = "species:S:1:pos:R:3" if has_species else "pos:R:3"
         if n_extra > 0:
             props += f":extra:R:{n_extra}"
+        if args.ids:
+            # Trailing 1..N column -> OVITO 'Particle Identifier'. Makes the
+            # position along the chain explicit, and lets Load Trajectory match
+            # particles to the topology by ID instead of by storage order.
+            props += ":id:I:1"
 
         # constants, formatted once and reused on every frame
         const_parts = [
@@ -488,6 +723,27 @@ def annotate_run(run_dir: str, args) -> dict:
                 "an in-plane axis has zero extent -- columns are probably misread; "
                 "try --layout species3"
             )
+
+        # The highlight expressions use the anchor value as a particle id, so a
+        # group that runs off the end of the chain would silently come up short
+        # in OVITO rather than error. Catch it here instead.
+        if args.highlights:
+            n_beads = atom_count(xyz_path)
+            for h in HIGHLIGHTS:
+                if h.anchor not in df.columns:
+                    result["details"].append(
+                        f"highlight '{h.name}': no '{h.anchor}' column in the CSV"
+                    )
+                    continue
+                vals = pd.to_numeric(df[h.anchor], errors="coerce").dropna()
+                if vals.empty:
+                    continue
+                if vals.min() < 1 or vals.max() + h.span - 1 > n_beads:
+                    result["details"].append(
+                        f"highlight '{h.name}': {h.anchor} spans "
+                        f"[{int(vals.min())}, {int(vals.max())}] + {h.span - 1} bead(s), "
+                        f"outside ids 1..{n_beads}"
+                    )
 
         # ---- pass 2: rewrite --------------------------------------------
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -540,16 +796,17 @@ def annotate_run(run_dir: str, args) -> dict:
 
                     out.write(f"{natoms}\n")
                     out.write(" ".join(parts) + "\n")
-                    for line in atoms:
-                        tok = line.split()
+                    for k, line in enumerate(atoms, start=1):
+                        bead = f" {k}" if args.ids else ""
                         if n_coords == 3:
-                            out.write(line + "\n")
+                            out.write(line + bead + "\n")
                         else:
+                            tok = line.split()
                             s = 1 if has_species else 0
                             head = tok[:s]  # species, if any
                             coords = tok[s : s + 2] + ["0.0"]  # x y -> x y 0.0
                             tail = tok[s + 2 :]  # any extra columns
-                            out.write(" ".join(head + coords + tail) + "\n")
+                            out.write(" ".join(head + coords + tail) + bead + "\n")
         except OSError as exc:
             # A half-written trajectory is worse than none: drop it either way.
             _unlink(out_path)
@@ -751,6 +1008,30 @@ def main() -> None:
         default=0.05,
         help="fractional padding on the generated cell (default: 0.05)",
     )
+    p.add_argument(
+        "--no-ids",
+        dest="ids",
+        action="store_false",
+        help="do not append the 1..N bead-index column (OVITO Particle Identifier)",
+    )
+    p.add_argument(
+        "--no-topology",
+        dest="topology",
+        action="store_false",
+        help="do not write the topology_N<n>.data chain-connectivity file(s)",
+    )
+    p.add_argument(
+        "--no-highlights",
+        dest="highlights",
+        action="store_false",
+        help="skip the monomer-highlight guide and its range checks",
+    )
+    p.add_argument(
+        "--guide-only",
+        action="store_true",
+        help="rewrite ovito_setup.txt from the current HIGHLIGHTS list and stop; "
+        "annotates nothing, so it is instant even with the disk unplugged",
+    )
     args = p.parse_args()
 
     args.root = os.path.abspath(os.path.expanduser(args.root))
@@ -772,6 +1053,19 @@ def main() -> None:
             )
         if not args.dry_run:
             os.makedirs(args.out_dir, exist_ok=True)
+
+    if args.guide_only:
+        # Take the chain length from whatever topology files are already there,
+        # so this works without touching the (possibly remote) data root.
+        lengths = set()
+        for p_ in glob.glob(os.path.join(args.out_dir, "topology_N*.data")):
+            m_ = re.search(r"topology_N(\d+)\.data$", p_)
+            if m_:
+                lengths.add(int(m_.group(1)))
+        print(f"Wrote    : {write_highlight_guide(args.out_dir, lengths)}")
+        for h in HIGHLIGHTS:
+            print(f"  {h.name}: {highlight_expression(h)}")
+        return
 
     # ---- discover -------------------------------------------------------
     runs = discover_runs(args.root)
@@ -841,16 +1135,51 @@ def main() -> None:
     )
     print(f"Estimate : {human(est)} of output, {human(free)} free on {probe}")
 
+    # One topology file per distinct chain length covers every run of that
+    # length -- the connectivity 1-2-3-...-N never changes within a run or
+    # between runs.
+    chain_types: dict[int, int] = {}  # chain length -> particle type to declare
+    if args.topology:
+        # When everything is already annotated there is still a topology file to
+        # (re)write if it went missing, so fall back to scanning every run.
+        for run_dir in [r for r, _ in pending] or runs:
+            xyz = os.path.join(run_dir, XYZ_NAME)
+            try:
+                n_ = atom_count(xyz)
+                if n_ not in chain_types:
+                    chain_types[n_] = first_species(xyz)
+            except (RunError, OSError):
+                pass  # the run itself will report the problem when it fails
+        if chain_types:
+            print(
+                f"Topology : {len(chain_types)} chain length(s): "
+                + ", ".join(f"N={n} (type {t})" for n, t in sorted(chain_types.items()))
+            )
+    chain_lengths = set(chain_types)
+
     if args.dry_run:
         for run_dir, out in pending:
             print(
                 f"  {os.path.relpath(run_dir, args.root)}  ->  {os.path.basename(out)}"
             )
+        for n in sorted(chain_lengths):
+            print(f"  (topology)  ->  topology_N{n}.data  [{n} beads, {n - 1} bonds]")
         for run_dir, msg in unresolved:
             print(f"  SKIP {os.path.relpath(run_dir, args.root)}: {msg}")
         return
 
     if not pending:
+        for n in sorted(chain_lengths):
+            if not os.path.isfile(os.path.join(args.out_dir, f"topology_N{n}.data")):
+                print(
+                    f"Wrote    : {os.path.basename(write_topology(n, args.out_dir, atom_type=chain_types[n]))} "
+                    f"({n} beads, {n - 1} bonds)"
+                )
+        if args.highlights:
+            print(
+                f"Wrote    : "
+                f"{os.path.basename(write_highlight_guide(args.out_dir, chain_lengths))}"
+            )
         print("\nNothing to do.")
         return
 
@@ -858,7 +1187,19 @@ def main() -> None:
         sys.exit(
             f"\nERROR: not enough free space -- need ~{human(est)}, have {human(free)}.\n"
             f"  Narrow the batch with --only / --limit, write elsewhere with\n"
-            f"  --out-root, free up space, or override with --force."
+            f"  --out-dir, free up space, or override with --force."
+        )
+
+    for n in sorted(chain_lengths):
+        print(
+            f"Wrote    : {os.path.basename(write_topology(n, args.out_dir, atom_type=chain_types[n]))} "
+            f"({n} beads, {n - 1} bonds)"
+        )
+    if args.highlights:
+        print(
+            f"Wrote    : "
+            f"{os.path.basename(write_highlight_guide(args.out_dir, chain_lengths))} "
+            f"({len(HIGHLIGHTS)} highlight(s))"
         )
 
     # ---- run -------------------------------------------------------------
@@ -914,6 +1255,27 @@ def main() -> None:
             "  F = [activity]<br>K = [bending]<br>theta = [ChiralityAngle] deg"
             "<br>Rg = [Rg]<br>Frame [Frame]"
         )
+        if chain_lengths:
+            n = sorted(chain_lengths)[0]
+            print("\nTo draw the chain as a connected line:")
+            print(f"  1. File > Load File ... topology_N{n}.data   (beads + bonds)")
+            print("     It shows a straight row of beads in a huge box -- expected;")
+            print("     both are placeholders that the next step replaces.")
+            print("  2. Add modifier > Load trajectory ... trajectory_F*.xyz")
+            print("     Beads are matched to the topology by their id column, so the")
+            print("     bonds follow the chain however it folds.")
+            print("  3. Bonds visual element > set the display width")
+        if args.highlights:
+            print("\nTo highlight monomers, add per highlight:")
+            print("  Expression selection  +  Assign color   (untick both to disable)")
+            for h in HIGHLIGHTS:
+                r, g, b = h.color
+                print(
+                    f"  {h.name:<14} RGB({round(r * 255)},{round(g * 255)},"
+                    f"{round(b * 255)})  {highlight_expression(h)}"
+                )
+            print("  Then one Clear selection at the top of the pipeline.")
+            print("  Full instructions: ovito_setup.txt (written next to the data)")
 
 
 def _consume(results, total, width, args, counts, failures, warnings, pool) -> None:
