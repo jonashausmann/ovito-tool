@@ -221,6 +221,13 @@ def render_video(xyz: str, args) -> str:
     data0 = pipeline.compute(0)
     if data0.cell is not None:
         data0.cell.vis.enabled = False
+    # ovito.scene is process-global: a pipeline added here stays in it after
+    # this function returns, and render_image draws EVERY pipeline in the
+    # scene. A worker that renders a second file would draw both trajectories.
+    # Start from an empty scene and detach this pipeline again in `finally`.
+    from ovito import scene
+    for old in list(scene.pipelines):
+        old.remove_from_scene()
     pipeline.add_to_scene()
 
     vp = Viewport(type=Viewport.Type.Top, fov=half_short)
@@ -282,6 +289,7 @@ def render_video(xyz: str, args) -> str:
             check=True,
         )
     finally:
+        pipeline.remove_from_scene()
         if not args.keep_frames:
             shutil.rmtree(tmp, ignore_errors=True)
     return (
@@ -400,13 +408,14 @@ def main():
         sys.exit("ffmpeg not found on PATH")
     fn = render_video if args.mode == "video" else render_still
     jobs = [(fn, f, args) for f in args.files]
-    if args.jobs > 1:
-        with multiprocessing.get_context("spawn").Pool(args.jobs) as pool:
-            for msg in pool.imap_unordered(_work, jobs):
-                print(msg, flush=True)
-    else:
-        for j in jobs:
-            print(_work(j), flush=True)
+    # Every file gets a FRESH worker process (maxtasksperchild=1), also when
+    # --jobs 1. OVITO keeps process-global state (the scene, async pipeline
+    # tasks), and reusing a process for a second file drew the previous
+    # trajectory into the new video and could cancel the trail evaluation.
+    ctx = multiprocessing.get_context("spawn")
+    with ctx.Pool(max(1, args.jobs), maxtasksperchild=1) as pool:
+        for msg in pool.imap_unordered(_work, jobs):
+            print(msg, flush=True)
 
 
 if __name__ == "__main__":
