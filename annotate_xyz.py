@@ -108,12 +108,14 @@ import pandas as pd
 
 # --------------------------------------------------------------------------
 # CONFIG -- edit these, or override with command-line flags
+# Typically "./data/"
 # --------------------------------------------------------------------------
-DATA_ROOT = "./data"
+DATA_ROOT = "../new_python-analysis/data/"
 
 # >>> Every annotated .xyz lands here, in one flat directory. CHANGE THIS LINE
 # >>> to point at your external disk (mount it first). Also: --out-dir PATH.
-OUTPUT_DIR = "./output"
+# Typically "./output/"
+OUTPUT_DIR = "/Volumes/project_files/ucmerced/annotated_directories/30_9_26_annotated_xyz"
 
 XYZ_NAME = "config0.xyz"  # input trajectory, inside each run dir
 INPUT_VALUES_NAME = "input_values.txt"  # constants, inside each run dir
